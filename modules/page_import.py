@@ -1,6 +1,6 @@
 """
 page_import.py
-Accueil et import : fichiers Word (.docx) ou JSON exporté depuis AALC.
+Accueil et import : fichiers Word (.docx), LibreOffice (.odt) ou JSON depuis AALC.
 """
 
 import io
@@ -8,29 +8,42 @@ import json
 import re
 import streamlit as st
 import pandas as pd
-from docx import Document as DocxDocument
-
-
-PERE_COL = {
-    "CONTEXTE_INITIAL": "#1B3A5C",
-    "VECU_DISPOSITIF": "#C0392B",
-    "ALIGNEMENT_THEORIQUE": "#7D3C98",
-    "TRANSFORMATION_PRATIQUE": "#E8A020",
-    "BILAN_REFLEXIF": "#27AE60",
-}
 
 
 def _extraire_texte_docx(octets: bytes) -> str:
+    from docx import Document as DocxDocument
     doc = DocxDocument(io.BytesIO(octets))
     return "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
 
 
+def _extraire_texte_odt(octets: bytes) -> str:
+    from odf.opendocument import load
+    from odf.text import P
+    doc = load(io.BytesIO(octets))
+    paras = doc.text.getElementsByType(P)
+    return "\n".join(str(p).strip() for p in paras if str(p).strip())
+
+
+def _extraire_texte(f) -> str:
+    octets = f.read()
+    nom = f.name.lower()
+    if nom.endswith(".odt"):
+        return _extraire_texte_odt(octets)
+    else:
+        return _extraire_texte_docx(octets)
+
+
 def _detecter_id(nom_fichier: str) -> str:
-    nom = nom_fichier.replace(".docx", "").strip().upper()
+    nom = nom_fichier.replace(".docx","").replace(".odt","").strip().upper()
     if re.match(r"^E\d{1,2}$", nom):
         return nom
-    m = re.search(r"E(\d{1,2})", nom)
-    return f"E{m.group(1)}" if m else "E1"
+    m = re.search(r"ENSEIGNANT[_\s\-]*(\d{1,2})", nom)
+    if m:
+        return f"E{m.group(1)}"
+    m = re.search(r"E[_\s]?(\d{1,2})", nom)
+    if m:
+        return f"E{m.group(1)}"
+    return "E1"
 
 
 def _normaliser_depuis_appec(raw: dict) -> dict:
@@ -82,15 +95,16 @@ def render():
 
     st.markdown("---")
 
-    st.markdown("### 📝 Importer les fichiers Word (.docx)")
+    st.markdown("### 📝 Importer les fichiers de transcription")
     st.markdown(
-        "Déposez vos 10 fichiers Word en une seule fois. "
-        "Nommez-les `E1.docx` … `E10.docx` pour que l'identifiant soit détecté automatiquement."
+        "Déposez vos 10 fichiers en une seule fois — formats **acceptés : .docx et .odt**. "
+        "Le numéro de l'enseignant est détecté automatiquement depuis le nom du fichier "
+        "(ex : `Enseignant_1_Dupont.odt` → E1)."
     )
 
     fichiers = st.file_uploader(
-        "Déposer les fichiers .docx",
-        type=["docx"],
+        "Déposer les fichiers (.docx ou .odt)",
+        type=["docx", "odt"],
         accept_multiple_files=True,
         key="upload_docx",
     )
@@ -118,23 +132,25 @@ def render():
                 )
             with c3:
                 if st.button("✅ Charger", key=f"btn_{f.name}"):
-                    octets = f.read()
-                    texte  = _extraire_texte_docx(octets)
-                    paras  = [p for p in texte.split("\n") if p.strip()]
-                    data   = st.session_state.setdefault("data_aalc", {"enseignants": {}})
-                    data["enseignants"][id_e] = {
-                        "id": id_e,
-                        "profil": {
-                            "groupe": groupe, "anciennete": "1-3 ans",
-                            "type_formation": "TP ECSR", "niveau_num": "Débutant",
-                            "phase": "En cours de formation", "organisme": "",
-                            "genre": "Non renseigné", "age_approx": "", "notes": "",
-                        },
-                        "verbatim": texte,
-                        "segments": [],
-                    }
-                    st.success(f"✅ {id_e} chargé — {len(paras)} paragraphes")
-                    st.rerun()
+                    try:
+                        texte = _extraire_texte(f)
+                        paras = [p for p in texte.split("\n") if p.strip()]
+                        data  = st.session_state.setdefault("data_aalc", {"enseignants": {}})
+                        data["enseignants"][id_e] = {
+                            "id": id_e,
+                            "profil": {
+                                "groupe": groupe, "anciennete": "1-3 ans",
+                                "type_formation": "TP ECSR", "niveau_num": "Débutant",
+                                "phase": "En cours de formation", "organisme": "",
+                                "genre": "Non renseigné", "age_approx": "", "notes": "",
+                            },
+                            "verbatim": texte,
+                            "segments": [],
+                        }
+                        st.success(f"✅ {id_e} chargé — {len(paras)} paragraphes")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur lors de la lecture de {f.name} : {e}")
 
     st.markdown("---")
 
