@@ -1,6 +1,8 @@
 """
+"""
 page_import.py
 Accueil et import : fichiers Word (.docx), LibreOffice (.odt) ou JSON depuis AALC.
+Les fichiers sont stockés en session_state AVANT de naviguer vers une autre page.
 """
 
 import io
@@ -24,10 +26,8 @@ def _extraire_texte_odt(octets: bytes) -> str:
     return "\n".join(str(p).strip() for p in paras if str(p).strip())
 
 
-def _extraire_texte(f) -> str:
-    octets = f.read()
-    nom = f.name.lower()
-    if nom.endswith(".odt"):
+def _extraire_texte(octets: bytes, nom: str) -> str:
+    if nom.lower().endswith(".odt"):
         return _extraire_texte_odt(octets)
     else:
         return _extraire_texte_docx(octets)
@@ -93,104 +93,112 @@ def render():
         "à une rupture de configuration des perspectives d'enseignement.*"
     )
 
+    if "data_aalc" not in st.session_state:
+        st.session_state["data_aalc"] = {"enseignants": {}}
+
     st.markdown("---")
 
     st.markdown("### 📝 Importer les fichiers de transcription")
     st.markdown(
-        "Déposez vos 10 fichiers en une seule fois — formats **acceptés : .docx et .odt**. "
-        "Le numéro de l'enseignant est détecté automatiquement depuis le nom du fichier "
-        "(ex : `Enseignant_1_Dupont.odt` → E1)."
+        "**1.** Déposez vos fichiers ci-dessous (.docx ou .odt)  \n"
+        "**2.** Vérifiez l'identifiant et le groupe de chaque fichier  \n"
+        "**3.** Cliquez **Charger tous les fichiers** pour les enregistrer en session"
     )
 
     fichiers = st.file_uploader(
         "Déposer les fichiers (.docx ou .odt)",
         type=["docx", "odt"],
         accept_multiple_files=True,
-        key="upload_docx",
+        key="upload_fichiers",
     )
 
     if fichiers:
         ids_dispo = [f"E{i}" for i in range(1, 11)]
+        configs = {}
+        st.markdown("#### Vérifiez les identifiants et groupes :")
         for f in fichiers:
             id_suggere = _detecter_id(f.name)
-            st.markdown(f"**{f.name}**")
-            c1, c2, c3 = st.columns([2, 2, 1])
+            c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
-                id_e = st.selectbox(
-                    "Identifiant",
-                    ids_dispo,
-                    index=ids_dispo.index(id_suggere) if id_suggere in ids_dispo else 0,
-                    key=f"id_{f.name}",
-                    label_visibility="collapsed",
-                )
+                st.markdown(f"📄 `{f.name}`")
             with c2:
-                groupe = st.selectbox(
-                    "Groupe",
-                    ["Hybride", "Traditionnel"],
-                    key=f"grp_{f.name}",
-                    label_visibility="collapsed",
+                id_e = st.selectbox(
+                    "ID", ids_dispo,
+                    index=ids_dispo.index(id_suggere) if id_suggere in ids_dispo else 0,
+                    key=f"id_{f.name}", label_visibility="collapsed",
                 )
             with c3:
-                if st.button("✅ Charger", key=f"btn_{f.name}"):
-                    try:
-                        texte = _extraire_texte(f)
-                        paras = [p for p in texte.split("\n") if p.strip()]
-                        data  = st.session_state.setdefault("data_aalc", {"enseignants": {}})
-                        data["enseignants"][id_e] = {
-                            "id": id_e,
-                            "profil": {
-                                "groupe": groupe, "anciennete": "1-3 ans",
-                                "type_formation": "TP ECSR", "niveau_num": "Débutant",
-                                "phase": "En cours de formation", "organisme": "",
-                                "genre": "Non renseigné", "age_approx": "", "notes": "",
-                            },
-                            "verbatim": texte,
-                            "segments": [],
-                        }
-                        st.success(f"✅ {id_e} chargé — {len(paras)} paragraphes")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur lors de la lecture de {f.name} : {e}")
+                groupe = st.selectbox(
+                    "Groupe", ["Hybride", "Traditionnel"],
+                    key=f"grp_{f.name}", label_visibility="collapsed",
+                )
+            configs[f.name] = {"id_e": id_e, "groupe": groupe, "fichier": f}
+
+        st.markdown("")
+        if st.button(
+            f"✅ Charger tous les fichiers ({len(fichiers)})",
+            type="primary", use_container_width=True,
+        ):
+            data = st.session_state["data_aalc"]
+            nb_ok = 0
+            for nom, cfg in configs.items():
+                try:
+                    octets = cfg["fichier"].read()
+                    texte  = _extraire_texte(octets, nom)
+                    paras  = [p for p in texte.split("\n") if p.strip()]
+                    id_e   = cfg["id_e"]
+                    data["enseignants"][id_e] = {
+                        "id": id_e,
+                        "profil": {
+                            "groupe": cfg["groupe"], "anciennete": "1-3 ans",
+                            "type_formation": "TP ECSR", "niveau_num": "Débutant",
+                            "phase": "En cours de formation", "organisme": "",
+                            "genre": "Non renseigné", "age_approx": "", "notes": "",
+                        },
+                        "verbatim": texte,
+                        "segments": data["enseignants"].get(id_e, {}).get("segments", []),
+                    }
+                    nb_ok += 1
+                except Exception as e:
+                    st.error(f"Erreur — {nom} : {e}")
+            st.session_state["data_aalc"] = data
+            st.success(
+                f"✅ {nb_ok} fichier(s) chargé(s). "
+                "Allez maintenant dans **Traitement individuel**."
+            )
+            st.rerun()
 
     st.markdown("---")
 
-    st.markdown("### 📂 Ou importer un fichier JSON (données déjà codées dans AALC)")
-
-    fichier_json = st.file_uploader(
-        "Déposer le fichier JSON",
-        type=["json"],
-        key="upload_json",
-    )
-
+    st.markdown("### 📂 Ou importer un fichier JSON")
+    fichier_json = st.file_uploader("Déposer le fichier JSON", type=["json"], key="upload_json")
     if fichier_json:
         try:
             raw  = json.loads(fichier_json.read().decode("utf-8"))
             data = _normaliser_depuis_aalc(raw)
             nb   = len(data.get("enseignants", {}))
             if nb == 0:
-                st.error("Aucun enseignant trouvé dans ce fichier.")
+                st.error("Aucun enseignant trouvé.")
             else:
                 st.session_state["data_aalc"] = data
-                st.success(f"✅ {nb} enseignant(s) chargé(s).")
+                st.success(f"✅ {nb} enseignant(s) chargé(s). Allez dans **Traitement individuel**.")
                 st.rerun()
         except Exception as e:
             st.error(f"Erreur : {e}")
 
     st.markdown("---")
+    ens = st.session_state.get("data_aalc", {}).get("enseignants", {})
+    if ens:
+        _afficher_apercu(ens)
+    else:
+        st.info("Aucun enseignant chargé pour l'instant.")
 
     with st.expander("✏️ Ajouter un enseignant manuellement"):
         _formulaire_manuel()
 
-    if st.session_state.get("data_aalc"):
-        st.markdown("---")
-        _afficher_apercu(st.session_state["data_aalc"])
 
-
-def _afficher_apercu(data: dict):
-    ens = data.get("enseignants", {})
-    if not ens:
-        return
-    st.markdown("### Enseignants chargés")
+def _afficher_apercu(ens: dict):
+    st.markdown("### ✅ Enseignants en session")
     lignes = []
     for id_e, d in sorted(ens.items()):
         p    = d.get("profil", {})
@@ -199,33 +207,23 @@ def _afficher_apercu(data: dict):
         nC   = sum(1 for s in segs if s.get("polarite") == "CONTINUITE")
         nb_para = len([l for l in d.get("verbatim","").split("\n") if l.strip()])
         lignes.append({
-            "ID":            id_e,
-            "Groupe":        p.get("groupe", "—"),
-            "Ancienneté":    p.get("anciennete", "—"),
-            "Paragraphes":   nb_para,
-            "Segments":      len(segs),
-            "🔴 Rupture":    nR,
-            "🟢 Continuité": nC,
+            "ID": id_e, "Groupe": p.get("groupe","—"),
+            "Paragraphes": nb_para, "Segments": len(segs),
+            "🔴 Rupture": nR, "🟢 Continuité": nC,
         })
     df = pd.DataFrame(lignes).set_index("ID")
-
     def col_groupe(val):
-        if val == "Hybride":
-            return "background-color:#D6EAF8;color:#1B3A5C;font-weight:bold"
-        elif val == "Traditionnel":
-            return "background-color:#D5F5E3;color:#1E8449;font-weight:bold"
+        if val == "Hybride": return "background-color:#D6EAF8;color:#1B3A5C;font-weight:bold"
+        elif val == "Traditionnel": return "background-color:#D5F5E3;color:#1E8449;font-weight:bold"
         return ""
-
     st.dataframe(df.style.applymap(col_groupe, subset=["Groupe"]), use_container_width=True)
-
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("Enseignants", len(ens))
-    c2.metric("Segments total", sum(len(d.get("segments",[])) for d in ens.values()))
-    c3.metric("Groupe Hybride", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Hybride"))
-    c4.metric("Groupe Traditionnel", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Traditionnel"))
-
+    c2.metric("Segments", sum(len(d.get("segments",[])) for d in ens.values()))
+    c3.metric("Hybride", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Hybride"))
+    c4.metric("Traditionnel", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Traditionnel"))
     if st.button("🗑️ Vider la session"):
-        st.session_state["data_aalc"] = {}
+        st.session_state["data_aalc"] = {"enseignants": {}}
         st.rerun()
 
 
@@ -240,8 +238,7 @@ def _formulaire_manuel():
             "profil": {"groupe": groupe, "anciennete": "1-3 ans", "type_formation": "TP ECSR",
                        "niveau_num": "Débutant", "phase": "En cours de formation",
                        "organisme": "", "genre": "Non renseigné", "age_approx": "", "notes": ""},
-            "verbatim": verbatim,
-            "segments": [],
+            "verbatim": verbatim, "segments": [],
         }
         st.success(f"✅ {id_e} ajouté.")
         st.rerun()
