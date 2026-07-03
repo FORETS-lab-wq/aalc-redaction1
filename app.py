@@ -16,7 +16,6 @@ h1,h2,h3 { color: #1B3A5C; }
 [data-testid="stSidebar"] hr { border-color: #2E4E6C; }
 .these-block { background: #FAFAFA; border-left: 4px solid #2E7D9A; padding: 16px 20px; margin: 12px 0; border-radius: 0 8px 8px 0; font-family: Georgia, serif; line-height: 1.8; font-size: 14px; }
 .these-block.rupture { border-left-color: #C0392B; }
-.stat-box { background: white; border: 1px solid #E0E0E0; border-radius: 8px; padding: 12px; text-align:center; }
 </style>
 """, unsafe_allow_html=True)
 
