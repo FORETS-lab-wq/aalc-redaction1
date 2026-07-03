@@ -26,7 +26,12 @@ h1,h2,h3 { color: #1B3A5C; }
 </style>
 """, unsafe_allow_html=True)
 
-from modules import page_import, page_individuel, page_longitudinal, page_transversal, page_synthese, page_export
+import modules.page_import as page_import
+import modules.page_individuel as page_individuel
+import modules.page_longitudinal as page_longitudinal
+import modules.page_transversal as page_transversal
+import modules.page_synthese as page_synthese
+import modules.page_export as page_export
 
 PAGES = {
     "🏠 Accueil & Import":        page_import,
