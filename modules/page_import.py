@@ -1,5 +1,4 @@
 """
-"""
 page_import.py
 Accueil et import : fichiers Word (.docx), LibreOffice (.odt) ou JSON depuis AALC.
 Les fichiers sont stockés en session_state AVANT de naviguer vers une autre page.
@@ -93,11 +92,13 @@ def render():
         "à une rupture de configuration des perspectives d'enseignement.*"
     )
 
+    # ── Initialisation session ────────────────────────────────────────────────
     if "data_aalc" not in st.session_state:
         st.session_state["data_aalc"] = {"enseignants": {}}
 
     st.markdown("---")
 
+    # ── OPTION 1 : Fichiers .docx ou .odt ────────────────────────────────────
     st.markdown("### 📝 Importer les fichiers de transcription")
     st.markdown(
         "**1.** Déposez vos fichiers ci-dessous (.docx ou .odt)  \n"
@@ -114,6 +115,8 @@ def render():
 
     if fichiers:
         ids_dispo = [f"E{i}" for i in range(1, 11)]
+
+        # Tableau de configuration
         configs = {}
         st.markdown("#### Vérifiez les identifiants et groupes :")
         for f in fichiers:
@@ -123,37 +126,49 @@ def render():
                 st.markdown(f"📄 `{f.name}`")
             with c2:
                 id_e = st.selectbox(
-                    "ID", ids_dispo,
+                    "ID",
+                    ids_dispo,
                     index=ids_dispo.index(id_suggere) if id_suggere in ids_dispo else 0,
-                    key=f"id_{f.name}", label_visibility="collapsed",
+                    key=f"id_{f.name}",
+                    label_visibility="collapsed",
                 )
             with c3:
                 groupe = st.selectbox(
-                    "Groupe", ["Hybride", "Traditionnel"],
-                    key=f"grp_{f.name}", label_visibility="collapsed",
+                    "Groupe",
+                    ["Hybride", "Traditionnel"],
+                    key=f"grp_{f.name}",
+                    label_visibility="collapsed",
                 )
             configs[f.name] = {"id_e": id_e, "groupe": groupe, "fichier": f}
 
         st.markdown("")
         if st.button(
             f"✅ Charger tous les fichiers ({len(fichiers)})",
-            type="primary", use_container_width=True,
+            type="primary",
+            use_container_width=True,
         ):
             data = st.session_state["data_aalc"]
             nb_ok = 0
+            nb_err = 0
             for nom, cfg in configs.items():
                 try:
                     octets = cfg["fichier"].read()
                     texte  = _extraire_texte(octets, nom)
                     paras  = [p for p in texte.split("\n") if p.strip()]
                     id_e   = cfg["id_e"]
+                    groupe = cfg["groupe"]
                     data["enseignants"][id_e] = {
                         "id": id_e,
                         "profil": {
-                            "groupe": cfg["groupe"], "anciennete": "1-3 ans",
-                            "type_formation": "TP ECSR", "niveau_num": "Débutant",
-                            "phase": "En cours de formation", "organisme": "",
-                            "genre": "Non renseigné", "age_approx": "", "notes": "",
+                            "groupe": groupe,
+                            "anciennete": "1-3 ans",
+                            "type_formation": "TP ECSR",
+                            "niveau_num": "Débutant",
+                            "phase": "En cours de formation",
+                            "organisme": "",
+                            "genre": "Non renseigné",
+                            "age_approx": "",
+                            "notes": "",
                         },
                         "verbatim": texte,
                         "segments": data["enseignants"].get(id_e, {}).get("segments", []),
@@ -161,38 +176,56 @@ def render():
                     nb_ok += 1
                 except Exception as e:
                     st.error(f"Erreur — {nom} : {e}")
+                    nb_err += 1
+
             st.session_state["data_aalc"] = data
-            st.success(
-                f"✅ {nb_ok} fichier(s) chargé(s). "
-                "Allez maintenant dans **Traitement individuel**."
-            )
+            if nb_ok:
+                st.success(
+                    f"✅ {nb_ok} fichier(s) chargé(s) en session. "
+                    "Vous pouvez maintenant aller dans **Traitement individuel**."
+                )
+            if nb_err:
+                st.warning(f"⚠️ {nb_err} fichier(s) en erreur.")
             st.rerun()
 
     st.markdown("---")
 
-    st.markdown("### 📂 Ou importer un fichier JSON")
-    fichier_json = st.file_uploader("Déposer le fichier JSON", type=["json"], key="upload_json")
+    # ── OPTION 2 : JSON ───────────────────────────────────────────────────────
+    st.markdown("### 📂 Ou importer un fichier JSON (session précédente ou export AALC)")
+
+    fichier_json = st.file_uploader(
+        "Déposer le fichier JSON",
+        type=["json"],
+        key="upload_json",
+    )
+
     if fichier_json:
         try:
             raw  = json.loads(fichier_json.read().decode("utf-8"))
             data = _normaliser_depuis_aalc(raw)
             nb   = len(data.get("enseignants", {}))
             if nb == 0:
-                st.error("Aucun enseignant trouvé.")
+                st.error("Aucun enseignant trouvé dans ce fichier.")
             else:
                 st.session_state["data_aalc"] = data
-                st.success(f"✅ {nb} enseignant(s) chargé(s). Allez dans **Traitement individuel**.")
+                st.success(
+                    f"✅ {nb} enseignant(s) chargé(s). "
+                    "Vous pouvez maintenant aller dans **Traitement individuel**."
+                )
                 st.rerun()
         except Exception as e:
             st.error(f"Erreur : {e}")
 
     st.markdown("---")
+
+    # ── Récapitulatif ─────────────────────────────────────────────────────────
     ens = st.session_state.get("data_aalc", {}).get("enseignants", {})
     if ens:
         _afficher_apercu(ens)
     else:
         st.info("Aucun enseignant chargé pour l'instant.")
 
+    # ── Saisie manuelle ───────────────────────────────────────────────────────
     with st.expander("✏️ Ajouter un enseignant manuellement"):
         _formulaire_manuel()
 
@@ -207,21 +240,32 @@ def _afficher_apercu(ens: dict):
         nC   = sum(1 for s in segs if s.get("polarite") == "CONTINUITE")
         nb_para = len([l for l in d.get("verbatim","").split("\n") if l.strip()])
         lignes.append({
-            "ID": id_e, "Groupe": p.get("groupe","—"),
-            "Paragraphes": nb_para, "Segments": len(segs),
-            "🔴 Rupture": nR, "🟢 Continuité": nC,
+            "ID":            id_e,
+            "Groupe":        p.get("groupe", "—"),
+            "Paragraphes":   nb_para,
+            "Segments":      len(segs),
+            "🔴 Rupture":    nR,
+            "🟢 Continuité": nC,
         })
     df = pd.DataFrame(lignes).set_index("ID")
+
     def col_groupe(val):
-        if val == "Hybride": return "background-color:#D6EAF8;color:#1B3A5C;font-weight:bold"
-        elif val == "Traditionnel": return "background-color:#D5F5E3;color:#1E8449;font-weight:bold"
+        if val == "Hybride":
+            return "background-color:#D6EAF8;color:#1B3A5C;font-weight:bold"
+        elif val == "Traditionnel":
+            return "background-color:#D5F5E3;color:#1E8449;font-weight:bold"
         return ""
+
     st.dataframe(df.style.applymap(col_groupe, subset=["Groupe"]), use_container_width=True)
-    c1,c2,c3,c4 = st.columns(4)
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Enseignants", len(ens))
-    c2.metric("Segments", sum(len(d.get("segments",[])) for d in ens.values()))
-    c3.metric("Hybride", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Hybride"))
-    c4.metric("Traditionnel", sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Traditionnel"))
+    c2.metric("Segments total", sum(len(d.get("segments",[])) for d in ens.values()))
+    c3.metric("Groupe Hybride",
+              sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Hybride"))
+    c4.metric("Groupe Traditionnel",
+              sum(1 for d in ens.values() if d.get("profil",{}).get("groupe")=="Traditionnel"))
+
     if st.button("🗑️ Vider la session"):
         st.session_state["data_aalc"] = {"enseignants": {}}
         st.rerun()
@@ -235,10 +279,14 @@ def _formulaire_manuel():
         data = st.session_state.setdefault("data_aalc", {"enseignants": {}})
         data["enseignants"][id_e] = {
             "id": id_e,
-            "profil": {"groupe": groupe, "anciennete": "1-3 ans", "type_formation": "TP ECSR",
-                       "niveau_num": "Débutant", "phase": "En cours de formation",
-                       "organisme": "", "genre": "Non renseigné", "age_approx": "", "notes": ""},
-            "verbatim": verbatim, "segments": [],
+            "profil": {
+                "groupe": groupe, "anciennete": "1-3 ans",
+                "type_formation": "TP ECSR", "niveau_num": "Débutant",
+                "phase": "En cours de formation", "organisme": "",
+                "genre": "Non renseigné", "age_approx": "", "notes": "",
+            },
+            "verbatim": verbatim,
+            "segments": [],
         }
         st.success(f"✅ {id_e} ajouté.")
         st.rerun()
